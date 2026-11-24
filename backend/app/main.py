@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db import Base, engine, get_db
+from app.config import settings
 from app.models import Project
 from app.schemas import ProjectCreate, ProjectRead, UploadCompleteRequest, UploadUrlRead, UploadUrlRequest
 from app.storage import create_video_upload_url, video_exists
@@ -122,6 +125,56 @@ def confirm_upload(project_id: str, payload: UploadCompleteRequest, db: Session 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded video was not found in storage.")
 
     project.status = "ready"
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@app.post("/api/v1/projects/{project_id}/upload", response_model=ProjectRead)
+def upload_video_locally(
+    project_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Local-development upload route. Docker mode uses the S3 upload URL flow."""
+    if settings.app_env != "local":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Use the direct storage upload URL in this environment.",
+        )
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    if not project.rights_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm that you own or have permission to process this video.",
+        )
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Choose a video file.")
+
+    settings.local_media_dir.mkdir(parents=True, exist_ok=True)
+    safe_filename = Path(file.filename or "video.mp4").name.replace("..", "_")
+    object_name = f"{project.id}-{uuid4()}-{safe_filename}"
+    destination = settings.local_media_dir / object_name
+    try:
+        with destination.open("wb") as output_file:
+            while chunk := file.file.read(1024 * 1024):
+                output_file.write(chunk)
+    except OSError as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not save the uploaded video.",
+        ) from exc
+    finally:
+        file.file.close()
+
+    project.source_type = "upload"
+    project.source_key = str(destination.relative_to(settings.local_media_dir.parent.parent))
+    project.status = "ready"
+    if project.title == "Untitled video":
+        project.title = Path(safe_filename).stem[:180] or project.title
     db.commit()
     db.refresh(project)
     return project

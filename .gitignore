@@ -8,3 +8,5 @@ venv/
 .ruff_cache/
 media/
 uploads/
+loopcut-local.db
+backend/local_media/

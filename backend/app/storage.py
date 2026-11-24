@@ -1,13 +1,12 @@
 from uuid import uuid4
 
-import boto3
-from botocore.client import Config
-from botocore.exceptions import ClientError
-
 from app.config import settings
 
 
 def _client(endpoint_url: str):
+    import boto3
+    from botocore.client import Config
+
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,
@@ -19,6 +18,8 @@ def _client(endpoint_url: str):
 
 
 def _ensure_bucket() -> None:
+    from botocore.exceptions import ClientError
+
     client = _client(settings.s3_internal_endpoint_url)
     try:
         client.head_bucket(Bucket=settings.s3_bucket)
@@ -43,6 +44,8 @@ def create_video_upload_url(project_id: str, filename: str, content_type: str) -
 
 
 def video_exists(object_key: str) -> bool:
+    from botocore.exceptions import ClientError
+
     client = _client(settings.s3_internal_endpoint_url)
     try:
         client.head_object(Bucket=settings.s3_bucket, Key=object_key)

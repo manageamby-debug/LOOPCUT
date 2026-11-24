@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     s3_access_key: str = "loopcut-dev"
     s3_secret_key: str = "loopcut-dev-secret"
     s3_bucket: str = "loopcut-media"
+    local_media_dir: Path = PROJECT_ROOT / "backend" / "local_media"
 
 
 settings = Settings()
