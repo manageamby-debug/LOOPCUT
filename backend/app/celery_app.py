@@ -24,3 +24,10 @@ celery_app.conf.update(
 def worker_ping() -> str:
     """Small task used to confirm that the worker can reach Redis."""
     return "Loopcut worker is ready."
+
+
+@celery_app.task(name="loopcut.render_video_export")
+def render_video_export_task(export_id: str) -> None:
+    from app.rendering import render_video_export
+
+    render_video_export(export_id)

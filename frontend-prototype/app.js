@@ -4,7 +4,9 @@ const editorView = document.getElementById("editorView");
 const sourceInput = document.getElementById("sourceInput");
 const fileInput = document.getElementById("fileInput");
 const videoPreview = document.getElementById("videoPreview");
+const externalPreview = document.getElementById("externalPreview");
 const samplePoster = document.getElementById("samplePoster");
+const rightsConfirmed = document.getElementById("rightsConfirmed");
 const captionText = document.getElementById("captionText");
 const captionLine = document.getElementById("captionLine");
 const captionWord = document.querySelector(".caption-word");
@@ -16,7 +18,64 @@ const momentData = [
 ];
 let activeMoment = 0;
 let objectUrl = null;
+let currentProjectId = null;
+let showingSampleMoments = true;
 let toastTimer;
+
+const API_BASE_URL = "http://localhost:8001/api/v1";
+
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, options);
+  } catch {
+    throw new Error("Loopcut could not reach the API. Make sure Docker is running and open this app at http://localhost:8088.");
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || `The API returned an error (${response.status}).`);
+  }
+  return payload;
+}
+
+function getClipRange() {
+  const value = document.getElementById("clipLength").value;
+  if (value === "under 30 sec") return { min_clip_seconds: 10, max_clip_seconds: 29 };
+  if (value === "60-90 sec") return { min_clip_seconds: 60, max_clip_seconds: 90 };
+  if (value === "up to 3 min") return { min_clip_seconds: 60, max_clip_seconds: 180 };
+  return { min_clip_seconds: 30, max_clip_seconds: 60 };
+}
+
+function getCaptionLanguage() {
+  const language = document.getElementById("captionLanguage").value;
+  const codes = { English: "en", Kiswahili: "sw", Spanish: "es", French: "fr", Arabic: "ar" };
+  return codes[language.replace(" captions", "")] || "en";
+}
+
+function getYouTubeEmbedUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    let videoId = "";
+    if (host === "youtu.be") videoId = url.pathname.split("/").filter(Boolean)[0] || "";
+    if (["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)) {
+      videoId = url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts)\/([^/?]+)/)?.[1] || "";
+    }
+    return /^[a-zA-Z0-9_-]{11}$/.test(videoId)
+      ? `https://www.youtube-nocookie.com/embed/${videoId}`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function clearSampleMoments(message) {
+  showingSampleMoments = false;
+  document.getElementById("momentsTitle").textContent = "No moments generated yet";
+  document.getElementById("momentList").innerHTML = `<div class="empty-state">${message}</div>`;
+  document.getElementById("captionOverlay").hidden = true;
+  document.getElementById("playPreview").hidden = true;
+}
 
 function showToast(message) {
   toast.textContent = message;
@@ -91,7 +150,11 @@ function updateCaptionOverlay() {
 document.querySelectorAll(".moment-card").forEach((card) => {
   card.addEventListener("click", () => applyMoment(Number(card.dataset.moment)));
 });
-document.querySelectorAll("[data-open-editor]").forEach((button) => button.addEventListener("click", () => switchView("editor")));
+document.querySelectorAll("[data-open-editor]").forEach((button) => button.addEventListener("click", () => {
+  currentProjectId = null;
+  switchView("editor");
+  showToast("This is a demo project. Upload a video to create a real export.");
+}));
 
 document.getElementById("uploadButton").addEventListener("click", () => fileInput.click());
 document.getElementById("newProjectCard").addEventListener("click", () => {
@@ -102,43 +165,106 @@ document.getElementById("newProjectCard").addEventListener("click", () => {
 fileInput.addEventListener("change", () => {
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
+  sourceInput.value = "";
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(file);
   videoPreview.src = objectUrl;
-  videoPreview.hidden = false;
-  samplePoster.hidden = true;
   setProjectTitle(file.name);
-  document.getElementById("sourceNote").innerHTML = '<span class="tiny-check">✓</span> Video loaded for local preview. AI processing will be connected to the worker pipeline next.';
-  switchView("editor");
-  showToast("Video loaded for preview. It has not been uploaded.");
+  document.getElementById("sourceNote").textContent = `${file.name} selected. Click “Find my moments” to save it to Loopcut.`;
 });
 
-document.getElementById("generateButton").addEventListener("click", () => {
+sourceInput.addEventListener("input", () => {
+  if (sourceInput.value && fileInput.files.length) {
+    fileInput.value = "";
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+    videoPreview.removeAttribute("src");
+  }
+});
+
+document.getElementById("generateButton").addEventListener("click", async () => {
   const source = sourceInput.value.trim();
-  if (!source && !fileInput.files.length) {
+  const file = fileInput.files && fileInput.files[0];
+  if (!source && !file) {
     showToast("Paste a video link or upload a video to start.");
     sourceInput.focus();
     return;
   }
+  if (source && file) {
+    showToast("Choose either a video link or a file, not both.");
+    return;
+  }
+  if (!rightsConfirmed.checked) {
+    showToast("Please confirm that you have permission to process this video.");
+    rightsConfirmed.focus();
+    return;
+  }
+
   const button = document.getElementById("generateButton");
   const original = button.innerHTML;
   button.disabled = true;
-  button.innerHTML = 'Finding moments… <span class="loading-spark">✳</span>';
-  if (source && !videoPreview.src) {
-    try {
-      const url = new URL(source);
-      const host = url.hostname.replace(/^www\./, "");
-      setProjectTitle(`${host} video project`);
-    } catch {
-      setProjectTitle("New video project");
+  button.innerHTML = 'Saving project… <span class="loading-spark">✳</span>';
+  document.getElementById("sourceNote").textContent = "Saving your source to Loopcut…";
+  try {
+    const clipRange = getClipRange();
+    const title = file
+      ? file.name.replace(/\.[^.]+$/, "")
+      : `${new URL(source).hostname.replace(/^www\./, "")} video`;
+    const project = await apiRequest("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        source_type: file ? "upload" : "url",
+        ...(source ? { source_url: source } : {}),
+        rights_confirmed: true,
+        caption_language: getCaptionLanguage(),
+        aspect_ratio: document.getElementById("outputRatio").value,
+        ...clipRange,
+      }),
+    });
+    currentProjectId = project.id;
+
+    if (file) {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      await apiRequest(`/projects/${project.id}/upload`, { method: "POST", body: form });
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(file);
+      videoPreview.src = objectUrl;
+      videoPreview.hidden = false;
+      externalPreview.hidden = true;
+      externalPreview.src = "";
+      document.getElementById("sourceLink").hidden = true;
+      samplePoster.hidden = true;
+      clearSampleMoments("Your video has been uploaded and saved. Transcription and automatic moment detection are the next processing step.");
+      document.getElementById("sourceNote").textContent = "Video uploaded and saved. Analysis has not started yet.";
+      setProjectTitle(file.name);
+      showToast("Video uploaded to your project.");
+    } else {
+      const embedUrl = getYouTubeEmbedUrl(source);
+      videoPreview.pause();
+      videoPreview.hidden = true;
+      videoPreview.removeAttribute("src");
+      externalPreview.hidden = !embedUrl;
+      externalPreview.src = embedUrl;
+      const sourceLink = document.getElementById("sourceLink");
+      sourceLink.href = source;
+      sourceLink.hidden = false;
+      samplePoster.hidden = true;
+      clearSampleMoments("The link is saved. YouTube playback is shown when available; automatic video import and analysis are not connected yet.");
+      document.getElementById("sourceNote").textContent = "Link saved to your project. The source video has not been imported or analyzed.";
+      setProjectTitle(title);
+      showToast("Video link saved. Automatic analysis is not connected yet.");
     }
-  }
-  setTimeout(() => {
     switchView("editor");
+  } catch (error) {
+    document.getElementById("sourceNote").textContent = error.message;
+    showToast(error.message);
+  } finally {
     button.disabled = false;
     button.innerHTML = original;
-    showToast("Sample moments are ready to explore. AI analysis connects next.");
-  }, 900);
+  }
 });
 
 document.getElementById("dismissNote").addEventListener("click", () => {
@@ -208,8 +334,9 @@ document.getElementById("centerButton").addEventListener("click", () => {
 });
 
 function togglePlayback() {
+  if (!externalPreview.hidden) return;
   if (videoPreview.hidden) {
-    showToast("Upload a video file to play a real preview.");
+    showToast("Choose a file or open a supported video link to preview it.");
     return;
   }
   if (videoPreview.paused) {
@@ -231,10 +358,67 @@ videoPreview.addEventListener("timeupdate", () => {
 videoPreview.addEventListener("loadedmetadata", () => {
   document.getElementById("endTime").textContent = formatTime(videoPreview.duration);
   document.getElementById("durationLabel").textContent = formatTime(videoPreview.duration);
-  applyMoment(activeMoment);
+  const endInput = document.getElementById("clipEndInput");
+  if (Number.isFinite(videoPreview.duration) && videoPreview.duration > 0) {
+    endInput.value = Math.min(videoPreview.duration, 60).toFixed(1);
+  }
+  if (showingSampleMoments) applyMoment(activeMoment);
 });
 
-document.getElementById("exportButton").addEventListener("click", () => showToast("Your clip settings are ready. The FFmpeg render worker is the next backend step."));
+async function pollExport(exportId, button) {
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const job = await apiRequest(`/projects/${currentProjectId}/exports/${exportId}`);
+    if (job.status === "failed") throw new Error(job.error_message || "The render failed.");
+    if (job.status === "complete") {
+      if (!job.download_url) throw new Error("The clip is ready, but its download link is missing.");
+      showToast("Your clip is ready. Starting download.");
+      window.location.assign(job.download_url);
+      return;
+    }
+    button.innerHTML = job.status === "queued"
+      ? "Waiting for render… <span>◷</span>"
+      : `Rendering ${job.progress}% <span class="loading-spark">✳</span>`;
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+  }
+  throw new Error("The render is still running. Please check again shortly.");
+}
+
+document.getElementById("exportButton").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  if (!currentProjectId) {
+    showToast("Open a saved project before exporting.");
+    return;
+  }
+  const startSeconds = Number(document.getElementById("clipStartInput").value);
+  const endSeconds = Number(document.getElementById("clipEndInput").value);
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
+    showToast("Enter a valid start and end time for the clip.");
+    return;
+  }
+
+  const originalButton = button.innerHTML;
+  button.disabled = true;
+  button.textContent = "Queueing export…";
+  try {
+    const job = await apiRequest(`/projects/${currentProjectId}/exports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_seconds: startSeconds,
+        end_seconds: endSeconds,
+        aspect_ratio: document.getElementById("outputRatio").value,
+      }),
+    });
+    showToast("Export queued. You can keep this page open while it renders.");
+    await pollExport(job.id, button);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalButton;
+  }
+});
 document.getElementById("fontSize").value = "2";
 
 const waveform = document.getElementById("waveform");

@@ -43,6 +43,48 @@ def create_video_upload_url(project_id: str, filename: str, content_type: str) -
     return object_key, upload_url
 
 
+def store_video_file(project_id: str, filename: str, content_type: str, fileobj) -> str:
+    _ensure_bucket()
+    safe_name = filename.replace("\\", "/").split("/")[-1]
+    object_key = f"sources/{project_id}/{uuid4()}-{safe_name}"
+    _client(settings.s3_internal_endpoint_url).upload_fileobj(
+        fileobj,
+        settings.s3_bucket,
+        object_key,
+        ExtraArgs={"ContentType": content_type},
+    )
+    return object_key
+
+
+def download_video_file(object_key: str, destination) -> None:
+    _client(settings.s3_internal_endpoint_url).download_file(
+        settings.s3_bucket,
+        object_key,
+        str(destination),
+    )
+
+
+def store_rendered_video(object_key: str, source_path) -> None:
+    _client(settings.s3_internal_endpoint_url).upload_file(
+        str(source_path),
+        settings.s3_bucket,
+        object_key,
+        ExtraArgs={"ContentType": "video/mp4"},
+    )
+
+
+def create_video_download_url(object_key: str) -> str:
+    return _client(settings.s3_public_endpoint_url).generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.s3_bucket,
+            "Key": object_key,
+            "ResponseContentDisposition": 'attachment; filename="loopcut-clip.mp4"',
+        },
+        ExpiresIn=900,
+    )
+
+
 def video_exists(object_key: str) -> bool:
     from botocore.exceptions import ClientError
 

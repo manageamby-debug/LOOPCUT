@@ -3,15 +3,30 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.celery_app import render_video_export_task
 from app.db import Base, engine, get_db
 from app.config import settings
-from app.models import Project
-from app.schemas import ProjectCreate, ProjectRead, UploadCompleteRequest, UploadUrlRead, UploadUrlRequest
-from app.storage import create_video_upload_url, video_exists
+from app.models import Project, VideoExport
+from app.schemas import (
+    ProjectCreate,
+    ProjectRead,
+    UploadCompleteRequest,
+    UploadUrlRead,
+    UploadUrlRequest,
+    VideoExportCreate,
+    VideoExportRead,
+)
+from app.storage import (
+    create_video_download_url,
+    create_video_upload_url,
+    store_video_file,
+    video_exists,
+)
 
 
 @asynccontextmanager
@@ -27,6 +42,12 @@ app = FastAPI(
     version="0.1.0",
     description="Project API for the Loopcut video clipping studio.",
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8088", "http://127.0.0.1:8088"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
@@ -54,6 +75,8 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
         min_clip_seconds=payload.min_clip_seconds,
         max_clip_seconds=payload.max_clip_seconds,
     )
+    if payload.source_type == "url":
+        project.status = "source_saved"
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -71,6 +94,74 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
     return project
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/exports",
+    response_model=VideoExportRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_video_export(
+    project_id: str,
+    payload: VideoExportCreate,
+    db: Session = Depends(get_db),
+):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    if not project.rights_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm that you own or have permission to process this video.",
+        )
+    if project.source_type != "upload" or not project.source_key:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Upload the source video before exporting. Link-only projects do not have a video file to render.",
+        )
+
+    export = VideoExport(
+        project_id=project.id,
+        start_seconds=payload.start_seconds,
+        end_seconds=payload.end_seconds,
+        aspect_ratio=payload.aspect_ratio,
+        status="queued",
+        progress=0,
+    )
+    db.add(export)
+    db.commit()
+    db.refresh(export)
+    try:
+        render_video_export_task.delay(export.id)
+    except Exception as exc:
+        export.status = "failed"
+        export.error_message = "The render queue is unavailable. Start the worker and try again."
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=export.error_message,
+        ) from exc
+    return export
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/exports/{export_id}",
+    response_model=VideoExportRead,
+)
+def get_video_export(project_id: str, export_id: str, db: Session = Depends(get_db)):
+    export = db.get(VideoExport, export_id)
+    if export is None or export.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
+    response = VideoExportRead.model_validate(export)
+    if export.status == "complete" and export.render_key:
+        try:
+            response.download_url = create_video_download_url(export.render_key)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The rendered video is ready, but its download link could not be created.",
+            ) from exc
+    return response
 
 
 @app.post("/api/v1/projects/{project_id}/upload-url", response_model=UploadUrlRead)
@@ -136,12 +227,7 @@ def upload_video_locally(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Local-development upload route. Docker mode uses the S3 upload URL flow."""
-    if settings.app_env != "local":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Use the direct storage upload URL in this environment.",
-        )
+    """Accept a browser upload and save it locally or to S3-compatible storage."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
@@ -153,25 +239,37 @@ def upload_video_locally(
     if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Choose a video file.")
 
-    settings.local_media_dir.mkdir(parents=True, exist_ok=True)
     safe_filename = Path(file.filename or "video.mp4").name.replace("..", "_")
-    object_name = f"{project.id}-{uuid4()}-{safe_filename}"
-    destination = settings.local_media_dir / object_name
     try:
-        with destination.open("wb") as output_file:
-            while chunk := file.file.read(1024 * 1024):
-                output_file.write(chunk)
+        if settings.app_env == "local":
+            settings.local_media_dir.mkdir(parents=True, exist_ok=True)
+            object_name = f"{project.id}-{uuid4()}-{safe_filename}"
+            destination = settings.local_media_dir / object_name
+            with destination.open("wb") as output_file:
+                while chunk := file.file.read(1024 * 1024):
+                    output_file.write(chunk)
+            project.source_key = str(destination.relative_to(settings.local_media_dir.parent.parent))
+        else:
+            project.source_key = store_video_file(
+                project.id,
+                safe_filename,
+                file.content_type,
+                file.file,
+            )
     except OSError as exc:
-        destination.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not save the uploaded video.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Video storage is unavailable.",
         ) from exc
     finally:
         file.file.close()
 
     project.source_type = "upload"
-    project.source_key = str(destination.relative_to(settings.local_media_dir.parent.parent))
     project.status = "ready"
     if project.title == "Untitled video":
         project.title = Path(safe_filename).stem[:180] or project.title

@@ -76,7 +76,7 @@
           </div>
 
           <div class="create-card">
-            <div class="create-heading"><div class="create-icon">↗</div><div><h2>Start with a video</h2><p>Paste a supported link or bring in a file you have permission to edit.</p></div></div>
+            <div class="create-heading"><div class="create-icon">↗</div><div><h2>Start with a video</h2><p>Save a video link or upload a file you have permission to edit.</p></div></div>
             <div class="source-input-wrap">
               <span class="link-icon">↗</span>
               <input id="sourceInput" type="url" placeholder="Paste a YouTube, Rumble, or video link..." aria-label="Video link" />
@@ -89,9 +89,10 @@
                 <label class="select-wrap"><span class="option-symbol">文</span><select id="captionLanguage" aria-label="Caption language"><option>English captions</option><option>Kiswahili captions</option><option>Spanish captions</option><option>French captions</option><option>Arabic captions</option><option>Choose after transcription</option></select><span class="select-arrow">⌄</span></label>
                 <label class="select-wrap"><span class="option-symbol">▣</span><select id="outputRatio" aria-label="Output format"><option value="9:16">Vertical · 9:16</option><option value="4:5">Feed · 4:5</option><option value="1:1">Square · 1:1</option><option value="16:9">Landscape · 16:9</option></select><span class="select-arrow">⌄</span></label>
               </div>
-              <button class="primary-button" id="generateButton">Find my moments <span>✳</span></button>
+              <button class="primary-button" id="generateButton">Save video source <span>✳</span></button>
             </div>
-            <div class="source-note" id="sourceNote"><span class="tiny-check">✓</span> Your original stays yours. Only process videos you own or have permission to use.</div>
+            <label class="rights-consent"><input type="checkbox" id="rightsConfirmed" /><span>I own this video or have permission to process it.</span></label>
+            <div class="source-note" id="sourceNote">Choose one source: a video link or a file from your PC.</div>
           </div>
 
           <div class="section-heading recent-heading"><div><span class="eyebrow muted-eyebrow">YOUR WORKSPACE</span><h2>Pick up where you left off</h2></div><button class="subtle-button" data-view="home">All projects <span>→</span></button></div>
@@ -112,11 +113,11 @@
             <div class="editor-header-actions"><span class="saved-status"><span class="green-pulse"></span> Saved just now</span><button class="secondary-button" id="shareButton" data-toast="Sharing will be connected after project accounts are added.">↗ Share</button><button class="primary-button export-button" id="exportButton">Export clip <span>↓</span></button></div>
           </div>
 
-          <div class="prototype-note"><span class="note-mark">✳</span><span><b>Studio preview</b> — Upload a video to preview it here. AI analysis and final rendering connect to the processing workers in the next build step.</span><button class="note-close" id="dismissNote" aria-label="Dismiss note">×</button></div>
+          <div class="prototype-note"><span class="note-mark">✳</span><span><b>Studio preview</b> — The sample project uses demo moments. Upload a video to create a real trim/crop export; captions and automatic moment detection are still being built.</span><a id="sourceLink" href="#" target="_blank" rel="noreferrer" hidden>Open source</a><button class="note-close" id="dismissNote" aria-label="Dismiss note">×</button></div>
 
           <div class="studio-grid">
             <section class="studio-main">
-              <div class="moments-header"><div><span class="eyebrow muted-eyebrow">AI MOMENTS</span><h2>8 moments found <span class="found-badge">✳</span></h2></div><button class="filter-button" data-toast="Moment filters will be connected to the analysis service.">☷ <span>Filter</span></button></div>
+              <div class="moments-header"><div><span class="eyebrow muted-eyebrow">AI MOMENTS</span><h2 id="momentsTitle">Sample moments <span class="found-badge">DEMO</span></h2></div><button class="filter-button" data-toast="Moment filters will be connected to the analysis service.">☷ <span>Filter</span></button></div>
               <div class="moment-list" id="momentList">
                 <button class="moment-card selected" data-moment="0"><span class="moment-rank">01</span><span class="moment-copy"><strong>The mindset shift nobody talks about</strong><small>00:42 – 01:28 <i>·</i> 46 sec</small></span><span class="moment-score"><b>94</b><small>score</small></span></button>
                 <button class="moment-card" data-moment="1"><span class="moment-rank">02</span><span class="moment-copy"><strong>My first product failed — here's why</strong><small>03:16 – 04:02 <i>·</i> 46 sec</small></span><span class="moment-score"><b>88</b><small>score</small></span></button>
@@ -130,6 +131,7 @@
                 <div class="preview-frame ratio-9-16" id="previewFrame">
                   <div class="sample-poster" id="samplePoster"><div class="poster-light"></div><div class="poster-person"><span class="poster-head"></span><span class="poster-body"></span></div><div class="poster-room"><span class="room-window"></span><span class="room-plant">♣</span></div></div>
                   <video id="videoPreview" playsinline controls hidden></video>
+                  <iframe id="externalPreview" title="Linked video preview" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen hidden></iframe>
                   <div class="caption-overlay" id="captionOverlay"><span class="caption-line" id="captionLine">THE MINDSET SHIFT<br /><b>NOBODY TALKS ABOUT</b></span><span class="caption-word">YET.</span></div>
                   <div class="preview-watermark">LOOPCUT <span>✳</span></div>
                 </div>
@@ -138,6 +140,7 @@
                 <div class="stage-tools"><button data-toast="Crop positioning will be editable after the video is connected.">⌖</button><button data-toast="Preview zoom controls will be connected with the video canvas.">⌕</button></div>
               </div>
 
+              <div class="clip-range-fields"><label>Start (seconds)<input id="clipStartInput" type="number" min="0" step="0.1" value="0" /></label><label>End (seconds)<input id="clipEndInput" type="number" min="0.1" step="0.1" value="30" /></label><span>Exports trim and crop this range. Caption rendering is next.</span></div>
               <div class="transport-row"><div class="transport-controls"><button class="transport-icon" id="skipBack" aria-label="Back five seconds">↶</button><button class="transport-play" id="transportPlay" aria-label="Play">▶</button><button class="transport-icon" id="skipForward" aria-label="Forward five seconds">↷</button><span class="time-readout"><b id="currentTime">00:42</b> / <span id="endTime">01:28</span></span></div><div class="timeline-actions"><button data-toast="Undo history will be added with project editing." aria-label="Undo">↶</button><button data-toast="Redo history will be added with project editing." aria-label="Redo">↷</button><span class="toolbar-separator"></span><button data-toast="Timeline zoom will be added with the editor controls." aria-label="Zoom out">−</button><button data-toast="Timeline zoom will be added with the editor controls." aria-label="Zoom in">＋</button></div></div>
 
               <div class="timeline-wrap"><div class="timeline-ruler"><span>00:30</span><span>00:45</span><span>01:00</span><span>01:15</span><span>01:30</span></div><div class="timeline-track"><div class="waveform" id="waveform"></div><div class="selection-window" id="selectionWindow"><span class="selection-handle left-handle"></span><span class="selection-label">SELECTED CLIP</span><span class="selection-handle right-handle"></span></div><div class="playhead"></div></div><div class="track-row"><span class="track-icon">▧</span><span class="track-name">Captions</span><div class="caption-track"><span>THE MINDSET SHIFT</span><span>NOBODY TALKS ABOUT</span><span>YET.</span></div></div><div class="track-row"><span class="track-icon audio-icon">≈</span><span class="track-name">Original audio</span><div class="audio-track"><div class="audio-wave"></div></div></div></div>

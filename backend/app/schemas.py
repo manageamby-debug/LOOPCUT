@@ -56,3 +56,27 @@ class UploadUrlRead(BaseModel):
 
 class UploadCompleteRequest(BaseModel):
     object_key: str = Field(min_length=1, max_length=700)
+
+
+class VideoExportCreate(BaseModel):
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0, le=18000)
+    aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] = "9:16"
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("end_seconds must be greater than start_seconds.")
+        if self.end_seconds - self.start_seconds > 180:
+            raise ValueError("A single export cannot exceed 180 seconds.")
+        return self
+
+
+class VideoExportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    status: str
+    progress: int
+    error_message: str | None
+    download_url: str | None = None

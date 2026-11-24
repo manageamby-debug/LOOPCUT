@@ -6,8 +6,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-loopcut}
       POSTGRES_USER: ${POSTGRES_USER:-loopcut}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-loopcut-local-only}
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,8 +17,6 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -49,6 +45,14 @@ services:
       timeout: 3s
       retries: 10
 
+  frontend:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:80"
+    volumes:
+      - ./frontend-prototype:/usr/share/nginx/html:ro
+
   api:
     build:
       context: ./backend
@@ -56,7 +60,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8001}:8000"
     depends_on:
       db:
         condition: service_healthy
