@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101311" />
+    <title>Loopcut — AI Clip Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#home" aria-label="Loopcut home">
+          <span class="brand-mark"><i></i><i></i><i></i></span>
+          <span>loopcut<span class="brand-dot">.</span></span>
+        </a>
+
+        <div class="workspace-switcher">
+          <div class="workspace-avatar">S</div>
+          <div class="workspace-copy"><span class="muted-label">WORKSPACE</span><strong>Studio One</strong></div>
+          <span class="chevron">⌄</span>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-label">CREATE</span>
+          <button class="nav-item active" data-view="home"><span class="nav-icon">⌂</span>Overview</button>
+          <button class="nav-item" data-view="editor"><span class="nav-icon">▤</span>Clip editor <span class="nav-count">1</span></button>
+        </div>
+        <div class="nav-group library-nav">
+          <span class="nav-label">LIBRARY</span>
+          <button class="nav-item" data-view="home"><span class="nav-icon">▦</span>Projects</button>
+          <button class="nav-item" data-view="templates"><span class="nav-icon">▧</span>Caption styles</button>
+          <button class="nav-item" data-view="brand"><span class="nav-icon">◈</span>Brand kit</button>
+        </div>
+
+        <div class="sidebar-spacer"></div>
+        <div class="credits-card">
+          <div class="credits-top"><span>Processing minutes</span><span class="credits-icon">◷</span></div>
+          <div class="credits-value">48 <span>/ 120 min</span></div>
+          <div class="credits-track"><span></span></div>
+          <button class="text-button" data-toast="Plans will be available when billing is connected.">Manage plan <span>↗</span></button>
+        </div>
+        <button class="profile-button">
+          <span class="profile-avatar">AM</span>
+          <span class="profile-copy"><strong>Alex Morgan</strong><small>Personal workspace</small></span>
+          <span class="more-dots">···</span>
+        </button>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="crumb-current">Overview</strong></div>
+          <div class="topbar-actions">
+            <span class="prototype-pill"><span class="status-dot"></span>Prototype</span>
+            <button class="icon-button" aria-label="Help" data-toast="Help center will be connected in a later step.">?</button>
+            <button class="top-avatar" aria-label="Account">AM</button>
+          </div>
+        </header>
+
+        <section class="view home-view active" id="homeView">
+          <div class="welcome-row">
+            <div>
+              <div class="eyebrow"><span class="sparkle">✳</span> YOUR SHORT-FORM STUDIO</div>
+              <h1>Make the best parts<br /><span>impossible to miss.</span></h1>
+              <p class="welcome-subtitle">Drop in a long video. We’ll find the moments worth sharing.</p>
+            </div>
+            <div class="hero-art" aria-hidden="true">
+              <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+              <div class="hero-play"><span>▶</span></div>
+              <div class="hero-caption">the moment<br /><b>everyone shares</b></div>
+              <div class="hero-spark spark-a">✳</div><div class="hero-spark spark-b">✦</div>
+            </div>
+          </div>
+
+          <div class="create-card">
+            <div class="create-heading"><div class="create-icon">↗</div><div><h2>Start with a video</h2><p>Paste a supported link or bring in a file you have permission to edit.</p></div></div>
+            <div class="source-input-wrap">
+              <span class="link-icon">↗</span>
+              <input id="sourceInput" type="url" placeholder="Paste a YouTube, Rumble, or video link..." aria-label="Video link" />
+              <button class="upload-button" id="uploadButton"><span>↑</span> Upload video</button>
+              <input id="fileInput" type="file" accept="video/*" hidden />
+            </div>
+            <div class="create-bottom">
+              <div class="option-row">
+                <label class="select-wrap"><span class="option-symbol">◷</span><select id="clipLength" aria-label="Clip length"><option value="30-60 sec">30–60 sec clips</option><option value="under 30 sec">Under 30 sec</option><option value="60-90 sec">60–90 sec</option><option value="up to 3 min">Up to 3 min</option></select><span class="select-arrow">⌄</span></label>
+                <label class="select-wrap"><span class="option-symbol">文</span><select id="captionLanguage" aria-label="Caption language"><option>English captions</option><option>Kiswahili captions</option><option>Spanish captions</option><option>French captions</option><option>Arabic captions</option><option>Choose after transcription</option></select><span class="select-arrow">⌄</span></label>
+                <label class="select-wrap"><span class="option-symbol">▣</span><select id="outputRatio" aria-label="Output format"><option value="9:16">Vertical · 9:16</option><option value="4:5">Feed · 4:5</option><option value="1:1">Square · 1:1</option><option value="16:9">Landscape · 16:9</option></select><span class="select-arrow">⌄</span></label>
+              </div>
+              <button class="primary-button" id="generateButton">Find my moments <span>✳</span></button>
+            </div>
+            <div class="source-note" id="sourceNote"><span class="tiny-check">✓</span> Your original stays yours. Only process videos you own or have permission to use.</div>
+          </div>
+
+          <div class="section-heading recent-heading"><div><span class="eyebrow muted-eyebrow">YOUR WORKSPACE</span><h2>Pick up where you left off</h2></div><button class="subtle-button" data-view="home">All projects <span>→</span></button></div>
+          <div class="recent-grid">
+            <button class="project-card featured-project" data-open-editor>
+              <div class="project-thumb thumb-purple"><div class="thumb-person"></div><span class="thumb-caption">THAT'S THE<br /><b>WHOLE POINT</b></span><span class="thumb-play">▶</span><span class="thumb-badge">9:16</span></div>
+              <div class="project-info"><div><strong>Founder interview — episode 12</strong><small>8 clip ideas · Updated 18 min ago</small></div><span class="card-arrow">↗</span></div>
+            </button>
+            <button class="project-card new-project-card" id="newProjectCard"><span class="new-project-icon">＋</span><strong>Start a new project</strong><small>Turn another video into clips</small></button>
+          </div>
+
+          <footer class="home-footer"><span><span class="green-pulse"></span> All systems ready</span><span>Made for the moments worth sharing.</span></footer>
+        </section>
+
+        <section class="view editor-view" id="editorView">
+          <div class="editor-header">
+            <div class="editor-title-group"><button class="back-button" data-view="home" aria-label="Back to overview">←</button><div><div class="editor-kicker">PROJECT / INTERVIEW</div><h1 id="projectTitle">Founder interview — episode 12</h1></div><button class="rename-button" data-toast="Project rename will be connected in the next step." aria-label="Rename project">✎</button></div>
+            <div class="editor-header-actions"><span class="saved-status"><span class="green-pulse"></span> Saved just now</span><button class="secondary-button" id="shareButton" data-toast="Sharing will be connected after project accounts are added.">↗ Share</button><button class="primary-button export-button" id="exportButton">Export clip <span>↓</span></button></div>
+          </div>
+
+          <div class="prototype-note"><span class="note-mark">✳</span><span><b>Studio preview</b> — Upload a video to preview it here. AI analysis and final rendering connect to the processing workers in the next build step.</span><button class="note-close" id="dismissNote" aria-label="Dismiss note">×</button></div>
+
+          <div class="studio-grid">
+            <section class="studio-main">
+              <div class="moments-header"><div><span class="eyebrow muted-eyebrow">AI MOMENTS</span><h2>8 moments found <span class="found-badge">✳</span></h2></div><button class="filter-button" data-toast="Moment filters will be connected to the analysis service.">☷ <span>Filter</span></button></div>
+              <div class="moment-list" id="momentList">
+                <button class="moment-card selected" data-moment="0"><span class="moment-rank">01</span><span class="moment-copy"><strong>The mindset shift nobody talks about</strong><small>00:42 – 01:28 <i>·</i> 46 sec</small></span><span class="moment-score"><b>94</b><small>score</small></span></button>
+                <button class="moment-card" data-moment="1"><span class="moment-rank">02</span><span class="moment-copy"><strong>My first product failed — here's why</strong><small>03:16 – 04:02 <i>·</i> 46 sec</small></span><span class="moment-score"><b>88</b><small>score</small></span></button>
+                <button class="moment-card" data-moment="2"><span class="moment-rank">03</span><span class="moment-copy"><strong>The advice I wish I heard at 22</strong><small>08:30 – 09:15 <i>·</i> 45 sec</small></span><span class="moment-score"><b>85</b><small>score</small></span></button>
+              </div>
+
+              <div class="preview-toolbar"><div class="preview-label"><span class="live-dot"></span> CLIP PREVIEW <span class="preview-divider">/</span><span id="previewClipName">Moment 01</span></div><div class="ratio-switcher" aria-label="Preview aspect ratio"><button class="ratio-button active" data-ratio="9:16">9:16</button><button class="ratio-button" data-ratio="4:5">4:5</button><button class="ratio-button" data-ratio="1:1">1:1</button><button class="ratio-button" data-ratio="16:9">16:9</button></div></div>
+
+              <div class="preview-stage">
+                <div class="video-backdrop"></div>
+                <div class="preview-frame ratio-9-16" id="previewFrame">
+                  <div class="sample-poster" id="samplePoster"><div class="poster-light"></div><div class="poster-person"><span class="poster-head"></span><span class="poster-body"></span></div><div class="poster-room"><span class="room-window"></span><span class="room-plant">♣</span></div></div>
+                  <video id="videoPreview" playsinline controls hidden></video>
+                  <div class="caption-overlay" id="captionOverlay"><span class="caption-line" id="captionLine">THE MINDSET SHIFT<br /><b>NOBODY TALKS ABOUT</b></span><span class="caption-word">YET.</span></div>
+                  <div class="preview-watermark">LOOPCUT <span>✳</span></div>
+                </div>
+                <button class="play-preview" id="playPreview" aria-label="Play preview">▶</button>
+                <div class="stage-duration"><span class="stage-dot"></span><span id="durationLabel">00:46</span></div>
+                <div class="stage-tools"><button data-toast="Crop positioning will be editable after the video is connected.">⌖</button><button data-toast="Preview zoom controls will be connected with the video canvas.">⌕</button></div>
+              </div>
+
+              <div class="transport-row"><div class="transport-controls"><button class="transport-icon" id="skipBack" aria-label="Back five seconds">↶</button><button class="transport-play" id="transportPlay" aria-label="Play">▶</button><button class="transport-icon" id="skipForward" aria-label="Forward five seconds">↷</button><span class="time-readout"><b id="currentTime">00:42</b> / <span id="endTime">01:28</span></span></div><div class="timeline-actions"><button data-toast="Undo history will be added with project editing." aria-label="Undo">↶</button><button data-toast="Redo history will be added with project editing." aria-label="Redo">↷</button><span class="toolbar-separator"></span><button data-toast="Timeline zoom will be added with the editor controls." aria-label="Zoom out">−</button><button data-toast="Timeline zoom will be added with the editor controls." aria-label="Zoom in">＋</button></div></div>
+
+              <div class="timeline-wrap"><div class="timeline-ruler"><span>00:30</span><span>00:45</span><span>01:00</span><span>01:15</span><span>01:30</span></div><div class="timeline-track"><div class="waveform" id="waveform"></div><div class="selection-window" id="selectionWindow"><span class="selection-handle left-handle"></span><span class="selection-label">SELECTED CLIP</span><span class="selection-handle right-handle"></span></div><div class="playhead"></div></div><div class="track-row"><span class="track-icon">▧</span><span class="track-name">Captions</span><div class="caption-track"><span>THE MINDSET SHIFT</span><span>NOBODY TALKS ABOUT</span><span>YET.</span></div></div><div class="track-row"><span class="track-icon audio-icon">≈</span><span class="track-name">Original audio</span><div class="audio-track"><div class="audio-wave"></div></div></div></div>
+            </section>
+
+            <aside class="inspector">
+              <div class="inspector-heading"><div><span class="eyebrow muted-eyebrow">CLIP SETTINGS</span><h2>Make it yours</h2></div><button class="more-button" data-toast="More clip actions will be added with saved projects.">···</button></div>
+              <div class="inspector-tabs"><button class="inspector-tab active" data-tab="captions">Captions</button><button class="inspector-tab" data-tab="reframe">Reframe</button><button class="inspector-tab" data-tab="audio">Audio</button></div>
+              <div class="inspector-panel active" id="captionsPanel">
+                <div class="setting-block"><div class="setting-label-row"><label for="editorLanguage">Caption language</label><span class="auto-tag">AUTO</span></div><select id="editorLanguage" class="full-select"><option>English</option><option>Kiswahili</option><option>Spanish</option><option>French</option><option>Arabic</option><option>Hindi</option></select><button class="translate-link" id="translateButton">＋ Add translation</button></div>
+                <div class="setting-block"><div class="setting-label-row"><span>Caption style</span><button class="text-button small-text">Browse styles <span>↗</span></button></div><div class="style-options"><button class="style-swatch active" data-style="bold">Aa<span>BOLD POP</span></button><button class="style-swatch style-yellow" data-style="highlight">Aa<span>HIGHLIGHT</span></button><button class="style-swatch style-clean" data-style="clean">Aa<span>CLEAN</span></button></div></div>
+                <div class="setting-block"><div class="setting-label-row"><label for="captionText">Edit caption</label><button class="text-button small-text" id="resetCaption">Reset</button></div><textarea id="captionText" rows="3">The mindset shift nobody talks about yet.</textarea><div class="caption-tools"><button data-toast="Caption timing will follow the word-level transcript." >◷ Adjust timing</button><button data-toast="Animated caption presets will be added to the render worker.">✧ Animate</button></div></div>
+                <div class="setting-block compact-setting"><div class="setting-label-row"><label for="fontSize">Text size</label><span id="fontSizeLabel">Large</span></div><input type="range" min="1" max="3" value="2" id="fontSize" class="accent-range" /></div>
+                <div class="setting-block compact-setting"><div class="setting-label-row"><label>Speaker label</label><button class="toggle-switch" id="speakerToggle" aria-pressed="false"><span></span></button></div><p class="setting-hint">Show the speaker’s name above captions.</p></div>
+              </div>
+              <div class="inspector-panel" id="reframePanel">
+                <div class="setting-block"><div class="setting-label-row"><span>Aspect ratio</span><span class="auto-tag">OUTPUT</span></div><div class="ratio-grid"><button class="ratio-choice active" data-ratio="9:16"><span class="ratio-preview portrait"></span>9:16</button><button class="ratio-choice" data-ratio="4:5"><span class="ratio-preview feed"></span>4:5</button><button class="ratio-choice" data-ratio="1:1"><span class="ratio-preview square"></span>1:1</button><button class="ratio-choice" data-ratio="16:9"><span class="ratio-preview landscape"></span>16:9</button></div></div>
+                <div class="setting-block"><div class="setting-label-row"><span>Subject tracking</span><span class="auto-tag">AI</span></div><button class="wide-setting-button active-setting" id="trackingButton"><span class="setting-button-icon">◎</span><span><b>Keep speaker in frame</b><small>Follow the main speaker automatically</small></span><span class="setting-check">✓</span></button><button class="wide-setting-button" id="centerButton"><span class="setting-button-icon">⊙</span><span><b>Center crop</b><small>Keep the frame fixed in the middle</small></span></button></div>
+                <div class="setting-block"><div class="setting-label-row"><span>Framing position</span><span>Center</span></div><input type="range" min="0" max="100" value="50" class="accent-range" id="framingRange" /><div class="range-labels"><span>Left</span><span>Right</span></div></div>
+                <div class="reframe-tip"><span>✳</span> Face tracking will be available once video analysis is connected.</div>
+              </div>
+              <div class="inspector-panel" id="audioPanel">
+                <div class="setting-block"><div class="setting-label-row"><label>Original audio</label><span>100%</span></div><input type="range" min="0" max="150" value="100" class="accent-range" id="audioVolume" /></div>
+                <div class="setting-block"><div class="setting-label-row"><label>Voice enhancement</label><button class="toggle-switch on" id="enhanceToggle" aria-pressed="true"><span></span></button></div><p class="setting-hint">Reduce background noise and even out speech volume.</p></div>
+                <div class="setting-block"><div class="setting-label-row"><label>Remove filler words</label><button class="toggle-switch" id="fillerToggle" aria-pressed="false"><span></span></button></div><p class="setting-hint">Suggest cuts for “um”, “uh”, and long pauses.</p></div>
+                <button class="music-button" data-toast="Music library will be added after rendering is connected."><span>♫</span><span><b>Add background music</b><small>Browse the sound library</small></span><span class="music-arrow">＋</span></button>
+              </div>
+              <div class="inspector-footer"><span>✳</span><span>Edits are saved as you work</span><span class="saved-check">✓</span></div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
