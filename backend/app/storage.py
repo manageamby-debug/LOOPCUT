@@ -111,6 +111,22 @@ def create_video_download_url(object_key: str) -> str:
     )
 
 
+def local_source_path(object_key: str) -> Path | None:
+    """Resolve a stored source video on disk (local mode), refusing paths outside local_media."""
+    path = (_local_root() / object_key).resolve()
+    media_dir = settings.local_media_dir.resolve()
+    return path if media_dir in path.parents and path.is_file() else None
+
+
+def create_video_stream_url(object_key: str) -> str:
+    """Short-lived URL a <video> element can play (no forced download)."""
+    return _client(settings.s3_public_endpoint_url).generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.s3_bucket, "Key": object_key},
+        ExpiresIn=3600,
+    )
+
+
 def video_exists(object_key: str) -> bool:
     from botocore.exceptions import ClientError
 

@@ -1,0 +1,23 @@
+/* Interactive timeline editor */
+.timeline-ruler { cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+.timeline-ruler span { pointer-events: none; }
+.timeline-track { cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.timeline-track.dragging, .timeline-ruler.dragging { cursor: grabbing; }
+.timeline-track .waveform { pointer-events: none; }
+.timeline-track .playhead { pointer-events: none; }
+
+.selection-window { cursor: grab; touch-action: none; min-width: 6px; }
+.timeline-track.dragging .selection-window { cursor: grabbing; }
+.selection-label { pointer-events: none; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: clip; }
+.selection-handle { width: 7px; cursor: ew-resize; touch-action: none; z-index: 3; }
+.selection-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: -6px; right: -6px; }
+.selection-handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 1.5px; height: 14px; transform: translate(-50%, -50%); background: rgba(46, 76, 28, .55); border-radius: 2px; }
+.selection-handle:hover { background: #8fbf5d; }
+
+.timeline-actions button:disabled { opacity: .3; cursor: default; }
+.timeline-actions button:disabled:hover { background: transparent; }
+
+.clip-range-fields { flex-wrap: wrap; }
+.range-set-button { height: 28px; padding: 0 9px; border: 1px solid #dfe6db; border-radius: 5px; color: #56704a; background: #f4f8ef; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.range-set-button:hover { background: #eaf2e0; }
+.range-set-button kbd { margin-left: 4px; padding: 0 4px; border: 1px solid #ccd8c2; border-radius: 3px; background: #fff; color: #7a8a70; font: 600 8px "DM Sans", sans-serif; }

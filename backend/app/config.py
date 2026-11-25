@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     s3_secret_key: str = "loopcut-dev-secret"
     s3_bucket: str = "loopcut-media"
     local_media_dir: Path = PROJECT_ROOT / "backend" / "local_media"
+    # Optional: let yt-dlp reuse a browser login (e.g. "chrome", "edge", "firefox") when
+    # YouTube asks to sign in / confirm you're not a bot.
+    ytdlp_cookies_from_browser: str | None = None
 
 
 settings = Settings()

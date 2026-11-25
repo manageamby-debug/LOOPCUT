@@ -26,6 +26,13 @@ def worker_ping() -> str:
     return "Loopcut worker is ready."
 
 
+@celery_app.task(name="loopcut.import_source_video")
+def import_source_video_task(job_id: str) -> None:
+    from app.importer import import_source_video
+
+    import_source_video(job_id)
+
+
 @celery_app.task(name="loopcut.render_video_export")
 def render_video_export_task(export_id: str) -> None:
     from app.rendering import render_video_export

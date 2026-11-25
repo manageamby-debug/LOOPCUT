@@ -1,20 +1,23 @@
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.celery_app import render_video_export_task
+from app.celery_app import import_source_video_task, render_video_export_task
 from app.db import Base, engine, get_db
 from app.config import settings
-from app.models import Project, VideoExport
+from app.importer import import_source_video
+from app.models import ProcessingJob, Project, VideoExport
 from app.rendering import render_video_export
 from app.schemas import (
+    ImportJobRead,
     ProjectCreate,
     ProjectRead,
     UploadCompleteRequest,
@@ -25,7 +28,9 @@ from app.schemas import (
 )
 from app.storage import (
     create_video_download_url,
+    create_video_stream_url,
     create_video_upload_url,
+    local_source_path,
     store_video_file,
     video_exists,
 )
@@ -119,10 +124,10 @@ def create_video_export(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confirm that you own or have permission to process this video.",
         )
-    if project.source_type != "upload" or not project.source_key:
+    if not project.source_key:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Upload the source video before exporting. Link-only projects do not have a video file to render.",
+            detail="Upload or import the source video before exporting. A saved link has no video file to render until it is imported.",
         )
 
     export = VideoExport(
@@ -173,6 +178,88 @@ def get_video_export(project_id: str, export_id: str, request: Request, db: Sess
                 detail="The rendered video is ready, but its download link could not be created.",
             ) from exc
     return response
+
+
+def _latest_import_job(db: Session, project_id: str) -> ProcessingJob | None:
+    return db.scalars(
+        select(ProcessingJob)
+        .where(ProcessingJob.project_id == project_id, ProcessingJob.stage == "import")
+        .order_by(ProcessingJob.created_at.desc())
+    ).first()
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/import",
+    response_model=ImportJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_source_import(project_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Download the video behind a saved link so it can be previewed, clipped and exported."""
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    if not project.rights_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm that you own or have permission to process this video.",
+        )
+    if project.source_type != "url" or not project.source_url:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This project has no link to import.")
+
+    latest = _latest_import_job(db, project.id)
+    if latest is not None and latest.status in {"queued", "running"}:
+        return latest
+    if latest is not None and latest.status == "complete" and project.source_key:
+        return latest
+
+    job = ProcessingJob(project_id=project.id, stage="import", status="queued", progress=0)
+    db.add(job)
+    project.status = "importing"
+    db.commit()
+    db.refresh(job)
+    try:
+        if settings.app_env == "local":
+            background_tasks.add_task(import_source_video, job.id)
+        else:
+            import_source_video_task.delay(job.id)
+    except Exception as exc:
+        job.status = "failed"
+        job.error_message = "The import queue is unavailable. Start the worker and try again."
+        project.status = "import_failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=job.error_message,
+        ) from exc
+    return job
+
+
+@app.get("/api/v1/projects/{project_id}/import", response_model=ImportJobRead)
+def get_source_import(project_id: str, db: Session = Depends(get_db)):
+    job = _latest_import_job(db, project_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No import has been started.")
+    return job
+
+
+@app.get("/api/v1/projects/{project_id}/source", include_in_schema=False)
+def stream_source_video(project_id: str, db: Session = Depends(get_db)):
+    """Serve the stored source video to the editor's <video> preview."""
+    project = db.get(Project, project_id)
+    if project is None or not project.source_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source video not found.")
+    if settings.app_env == "local":
+        path = local_source_path(project.source_key)
+        if path is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source video not found.")
+        return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "video/mp4")
+    try:
+        return RedirectResponse(create_video_stream_url(project.source_key))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Video storage is unavailable.",
+        ) from exc
 
 
 @app.get("/api/v1/downloads/{render_key:path}", include_in_schema=False)

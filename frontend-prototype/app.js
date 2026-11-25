@@ -122,19 +122,10 @@ function applyMoment(index) {
   const moment = momentData[index];
   document.querySelectorAll(".moment-card").forEach((card) => card.classList.toggle("selected", Number(card.dataset.moment) === index));
   document.getElementById("previewClipName").textContent = `Moment ${String(index + 1).padStart(2, "0")}`;
-  document.getElementById("currentTime").textContent = formatTime(moment.start);
-  document.getElementById("endTime").textContent = formatTime(moment.end);
-  document.getElementById("durationLabel").textContent = formatTime(moment.end - moment.start);
   captionText.value = moment.caption;
   updateCaptionOverlay();
-  const startPercent = 18 + index * 9;
-  const selection = document.getElementById("selectionWindow");
-  selection.style.left = `${startPercent}%`;
-  selection.style.width = `${43 - index * 3}%`;
-  document.querySelector(".playhead").style.left = `${startPercent + 13}%`;
-  if (!videoPreview.hidden && Number.isFinite(videoPreview.duration)) {
-    videoPreview.currentTime = Math.min(moment.start, Math.max(0, videoPreview.duration - 0.5));
-  }
+  setClipRange(moment.start, moment.end, { commit: false });
+  seekTo(clipRange.start);
 }
 
 function formatTime(seconds) {
@@ -255,10 +246,11 @@ document.getElementById("generateButton").addEventListener("click", async () => 
       sourceLink.href = source;
       sourceLink.hidden = false;
       samplePoster.hidden = true;
-      clearSampleMoments("The link is saved. YouTube playback is shown when available; automatic video import and analysis are not connected yet.");
-      document.getElementById("sourceNote").textContent = "Link saved to your project. The source video has not been imported or analyzed.";
+      clearSampleMoments("The link is saved. Downloading the video so you can clip it\u2026");
+      document.getElementById("sourceNote").textContent = "Link saved. Importing the video so you can clip and export it\u2026";
       setProjectTitle(title);
-      showToast("Video link saved. Automatic analysis is not connected yet.");
+      showToast("Link saved. Importing the video so you can clip it\u2026");
+      importLinkSource(project.id); // runs in the background; progress shows in the editor
     }
     switchView("editor");
   } catch (error) {
@@ -343,6 +335,11 @@ function togglePlayback() {
     return;
   }
   if (videoPreview.paused) {
+    // Play only the selected clip: start from the in-point if the playhead is outside it.
+    if (videoPreview.currentTime < clipRange.start - 0.05 || videoPreview.currentTime >= clipRange.end - 0.05) {
+      videoPreview.currentTime = clipRange.start;
+    }
+    playingSelection = true;
     videoPreview.play().catch(() => showToast("This video format cannot be previewed in the browser."));
   } else {
     videoPreview.pause();
@@ -354,19 +351,405 @@ document.getElementById("skipBack").addEventListener("click", () => { if (!video
 document.getElementById("skipForward").addEventListener("click", () => { if (!videoPreview.hidden) videoPreview.currentTime = Math.min(videoPreview.duration || 0, videoPreview.currentTime + 5); });
 videoPreview.addEventListener("play", () => { document.getElementById("playPreview").textContent = "Ⅱ"; document.getElementById("transportPlay").textContent = "Ⅱ"; });
 videoPreview.addEventListener("pause", () => { document.getElementById("playPreview").textContent = "▶"; document.getElementById("transportPlay").textContent = "▶"; });
-videoPreview.addEventListener("timeupdate", () => {
-  document.getElementById("currentTime").textContent = formatTime(videoPreview.currentTime);
-  if (Number.isFinite(videoPreview.duration)) document.getElementById("endTime").textContent = formatTime(videoPreview.duration);
-});
+videoPreview.addEventListener("timeupdate", () => renderPlayhead());
+videoPreview.addEventListener("seeked", () => renderPlayhead());
 videoPreview.addEventListener("loadedmetadata", () => {
-  document.getElementById("endTime").textContent = formatTime(videoPreview.duration);
-  document.getElementById("durationLabel").textContent = formatTime(videoPreview.duration);
-  const endInput = document.getElementById("clipEndInput");
-  if (Number.isFinite(videoPreview.duration) && videoPreview.duration > 0) {
-    endInput.value = Math.min(videoPreview.duration, 60).toFixed(1);
-  }
-  if (showingSampleMoments) applyMoment(activeMoment);
+  if (!Number.isFinite(videoPreview.duration) || videoPreview.duration <= 0) return;
+  resetTimelineForVideo();
 });
+
+/* ---------- Interactive timeline editor ---------- */
+const DEMO_DURATION = 600;
+const MAX_CLIP_SECONDS = 180; // the API rejects longer exports
+const MIN_CLIP_SECONDS = 0.5;
+const timelineTrack = document.getElementById("timelineTrack");
+const timelineRuler = document.getElementById("timelineRuler");
+const selectionWindow = document.getElementById("selectionWindow");
+const selectionLabel = selectionWindow.querySelector(".selection-label");
+const playheadEl = timelineTrack.querySelector(".playhead");
+const clipStartField = document.getElementById("clipStartInput");
+const clipEndField = document.getElementById("clipEndInput");
+const undoButton = document.getElementById("undoButton");
+const redoButton = document.getElementById("redoButton");
+const zoomInButton = document.getElementById("zoomInButton");
+const zoomOutButton = document.getElementById("zoomOutButton");
+
+const clipRange = { start: 0, end: 30 };          // selected clip, in seconds
+const viewport = { start: 0, end: DEMO_DURATION }; // visible part of the timeline, in seconds
+let editHistory = [{ start: 0, end: 30 }];
+let historyIndex = 0;
+let drag = null;
+let playingSelection = false;
+let demoTime = 0;
+let rafId = 0;
+
+function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+function totalDuration() {
+  const duration = videoPreview.duration;
+  return videoPreview.getAttribute("src") && Number.isFinite(duration) && duration > 0 ? duration : DEMO_DURATION;
+}
+
+function minClipLength() { return Math.min(MIN_CLIP_SECONDS, totalDuration() / 2); }
+function timeToPercent(time) { return ((time - viewport.start) / (viewport.end - viewport.start)) * 100; }
+function currentPlayTime() { return videoPreview.getAttribute("src") ? (videoPreview.currentTime || 0) : demoTime; }
+
+function formatPrecise(seconds) {
+  const safe = Math.max(0, seconds);
+  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${(safe % 60).toFixed(1).padStart(4, "0")}`;
+}
+
+function pointerTime(event) {
+  const rect = timelineTrack.getBoundingClientRect();
+  const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+  return viewport.start + ratio * (viewport.end - viewport.start);
+}
+
+function renderRuler() {
+  const span = viewport.end - viewport.start;
+  const precise = span < 30;
+  timelineRuler.innerHTML = "";
+  for (let index = 0; index < 5; index += 1) {
+    const time = viewport.start + (span * index) / 4;
+    const label = document.createElement("span");
+    label.textContent = precise ? formatPrecise(time) : formatTime(time);
+    timelineRuler.appendChild(label);
+  }
+}
+
+function renderPlayhead() {
+  const time = currentPlayTime();
+  const percent = timeToPercent(time);
+  playheadEl.style.display = percent < 0 || percent > 100 ? "none" : "";
+  playheadEl.style.left = `${percent}%`;
+  document.getElementById("currentTime").textContent = formatTime(time);
+  document.getElementById("endTime").textContent = formatTime(totalDuration());
+}
+
+function renderTimeline() {
+  const total = totalDuration();
+  if (viewport.end > total + 0.01 || viewport.end - viewport.start <= 0) {
+    viewport.start = 0;
+    viewport.end = total;
+    renderRuler();
+  }
+  const left = timeToPercent(clipRange.start);
+  const right = timeToPercent(clipRange.end);
+  selectionWindow.style.left = `${left}%`;
+  selectionWindow.style.width = `${Math.max(right - left, 0.3)}%`;
+  const length = clipRange.end - clipRange.start;
+  selectionLabel.textContent = `${formatTime(clipRange.start)} \u2013 ${formatTime(clipRange.end)} \u00b7 ${length.toFixed(1)}s`;
+  document.getElementById("durationLabel").textContent = formatTime(length);
+  const span = viewport.end - viewport.start;
+  zoomOutButton.disabled = span >= total - 0.01;
+  zoomInButton.disabled = span <= Math.min(5, total) + 0.01;
+  renderPlayhead();
+}
+
+function syncRangeInputs() {
+  clipStartField.value = clipRange.start.toFixed(1);
+  clipEndField.value = clipRange.end.toFixed(1);
+}
+
+function updateHistoryButtons() {
+  undoButton.disabled = historyIndex <= 0;
+  redoButton.disabled = historyIndex >= editHistory.length - 1;
+}
+
+function pushHistory() {
+  const last = editHistory[historyIndex];
+  if (last && Math.abs(last.start - clipRange.start) < 0.001 && Math.abs(last.end - clipRange.end) < 0.001) return;
+  editHistory = editHistory.slice(0, historyIndex + 1);
+  editHistory.push({ start: clipRange.start, end: clipRange.end });
+  if (editHistory.length > 100) editHistory.shift();
+  historyIndex = editHistory.length - 1;
+  updateHistoryButtons();
+}
+
+function applyHistoryStep() {
+  const step = editHistory[historyIndex];
+  setClipRange(step.start, step.end, { commit: false });
+  updateHistoryButtons();
+}
+function undoRange() { if (historyIndex > 0) { historyIndex -= 1; applyHistoryStep(); } }
+function redoRange() { if (historyIndex < editHistory.length - 1) { historyIndex += 1; applyHistoryStep(); } }
+
+function setClipRange(start, end, { commit = true, anchor = "start" } = {}) {
+  const total = totalDuration();
+  const minLength = minClipLength();
+  start = clamp(Number(start) || 0, 0, Math.max(0, total - minLength));
+  end = clamp(Number(end) || 0, start + minLength, total);
+  if (end - start > MAX_CLIP_SECONDS) {
+    if (anchor === "end") start = end - MAX_CLIP_SECONDS;
+    else end = start + MAX_CLIP_SECONDS;
+  }
+  clipRange.start = start;
+  clipRange.end = end;
+  syncRangeInputs();
+  renderTimeline();
+  if (commit) pushHistory();
+}
+
+function seekTo(time) {
+  const target = clamp(time, 0, totalDuration());
+  if (videoPreview.getAttribute("src")) {
+    if (Number.isFinite(videoPreview.duration)) videoPreview.currentTime = target;
+  } else {
+    demoTime = target;
+  }
+  renderPlayhead();
+}
+
+function setViewport(start, end) {
+  const total = totalDuration();
+  const span = clamp(end - start, Math.min(5, total), total);
+  const from = clamp(start, 0, total - span);
+  viewport.start = from;
+  viewport.end = from + span;
+  renderRuler();
+  renderTimeline();
+}
+
+function resetTimelineForVideo() {
+  const total = totalDuration();
+  viewport.start = 0;
+  viewport.end = total;
+  renderRuler();
+  setClipRange(0, Math.min(total, 60), { commit: false });
+  editHistory = [{ start: clipRange.start, end: clipRange.end }];
+  historyIndex = 0;
+  updateHistoryButtons();
+}
+
+/* Drag handling: trim handles, move the whole clip, scrub the playhead, pan the ruler */
+function startDrag(mode, event, target) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  drag = {
+    mode,
+    pointerId: event.pointerId,
+    origin: pointerTime(event),
+    clientX: event.clientX,
+    start: clipRange.start,
+    end: clipRange.end,
+    viewStart: viewport.start,
+    viewEnd: viewport.end,
+    moved: false,
+  };
+  try { target.setPointerCapture(event.pointerId); } catch { /* not supported */ }
+  (mode === "pan" ? timelineRuler : timelineTrack).classList.add("dragging");
+}
+
+function onDragMove(event) {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (Math.abs(event.clientX - drag.clientX) > 3) drag.moved = true;
+  const total = totalDuration();
+  const minLength = minClipLength();
+  if (drag.mode === "pan") {
+    const rect = timelineTrack.getBoundingClientRect();
+    const delta = -((event.clientX - drag.clientX) / rect.width) * (drag.viewEnd - drag.viewStart);
+    setViewport(drag.viewStart + delta, drag.viewEnd + delta);
+    return;
+  }
+  const time = pointerTime(event);
+  if (drag.mode === "scrub") {
+    seekTo(time);
+  } else if (drag.mode === "left") {
+    const start = Math.max(clamp(time, 0, drag.end - minLength), drag.end - MAX_CLIP_SECONDS);
+    setClipRange(start, drag.end, { commit: false, anchor: "end" });
+    seekTo(clipRange.start);
+  } else if (drag.mode === "right") {
+    const end = Math.min(clamp(time, drag.start + minLength, total), drag.start + MAX_CLIP_SECONDS);
+    setClipRange(drag.start, end, { commit: false });
+    seekTo(Math.max(0, clipRange.end - 0.05));
+  } else if (drag.mode === "move" && drag.moved) {
+    const length = drag.end - drag.start;
+    const start = clamp(drag.start + (time - drag.origin), 0, total - length);
+    setClipRange(start, start + length, { commit: false });
+  }
+}
+
+function endDrag(event) {
+  if (!drag || (event && event.pointerId !== drag.pointerId)) return;
+  if (drag.mode === "move" && !drag.moved) seekTo(drag.origin); // a plain click on the clip just seeks
+  if (drag.mode === "left" || drag.mode === "right" || drag.mode === "move") pushHistory();
+  drag = null;
+  timelineTrack.classList.remove("dragging");
+  timelineRuler.classList.remove("dragging");
+}
+
+window.addEventListener("pointermove", onDragMove);
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
+selectionWindow.querySelector(".left-handle").addEventListener("pointerdown", (event) => startDrag("left", event, event.currentTarget));
+selectionWindow.querySelector(".right-handle").addEventListener("pointerdown", (event) => startDrag("right", event, event.currentTarget));
+selectionWindow.addEventListener("pointerdown", (event) => startDrag("move", event, selectionWindow));
+timelineTrack.addEventListener("pointerdown", (event) => {
+  startDrag("scrub", event, timelineTrack);
+  if (drag) seekTo(drag.origin);
+});
+timelineRuler.addEventListener("pointerdown", (event) => startDrag("pan", event, timelineRuler));
+
+/* Zoom + pan */
+function zoomInOnClip() {
+  const center = (clipRange.start + clipRange.end) / 2;
+  const span = (viewport.end - viewport.start) / 2;
+  setViewport(center - span / 2, center + span / 2);
+}
+function zoomOutTimeline() {
+  const center = (viewport.start + viewport.end) / 2;
+  const span = (viewport.end - viewport.start) * 2;
+  setViewport(center - span / 2, center + span / 2);
+}
+function fitClipInView() {
+  const length = clipRange.end - clipRange.start;
+  setViewport(clipRange.start - length * 0.5, clipRange.end + length * 0.5);
+}
+zoomInButton.addEventListener("click", zoomInOnClip);
+zoomOutButton.addEventListener("click", zoomOutTimeline);
+selectionWindow.addEventListener("dblclick", fitClipInView);
+timelineTrack.addEventListener("wheel", (event) => {
+  const span = viewport.end - viewport.start;
+  if (event.ctrlKey || event.metaKey) {
+    event.preventDefault();
+    const time = pointerTime(event);
+    const ratio = (time - viewport.start) / span;
+    const newSpan = span * (event.deltaY < 0 ? 0.8 : 1.25);
+    setViewport(time - ratio * newSpan, time - ratio * newSpan + newSpan);
+  } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+    event.preventDefault();
+    const delta = ((event.deltaX || event.deltaY) / 600) * span;
+    setViewport(viewport.start + delta, viewport.end + delta);
+  }
+}, { passive: false });
+
+/* Playback: draw the playhead smoothly and stop at the end of the selection */
+function playbackTick() {
+  const time = videoPreview.currentTime;
+  if (time > viewport.end || time < viewport.start) {
+    const span = viewport.end - viewport.start;
+    setViewport(time - span * 0.1, time + span * 0.9);
+  }
+  renderPlayhead();
+  if (playingSelection && time >= clipRange.end) {
+    playingSelection = false;
+    videoPreview.pause();
+    videoPreview.currentTime = clipRange.start;
+    renderPlayhead();
+    return;
+  }
+  rafId = videoPreview.paused ? 0 : requestAnimationFrame(playbackTick);
+}
+videoPreview.addEventListener("play", () => {
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(playbackTick);
+});
+videoPreview.addEventListener("pause", () => {
+  playingSelection = false;
+  cancelAnimationFrame(rafId);
+  rafId = 0;
+  renderPlayhead();
+});
+
+/* Number fields, set-in/out buttons, undo/redo */
+clipStartField.addEventListener("change", () => {
+  const start = Number(clipStartField.value);
+  if (!clipStartField.value.trim() || !Number.isFinite(start)) { syncRangeInputs(); return; }
+  setClipRange(start, Math.max(clipRange.end, start + minClipLength()), { anchor: "start" });
+  seekTo(clipRange.start);
+});
+clipEndField.addEventListener("change", () => {
+  const end = Number(clipEndField.value);
+  if (!clipEndField.value.trim() || !Number.isFinite(end)) { syncRangeInputs(); return; }
+  setClipRange(Math.min(clipRange.start, end - minClipLength()), end, { anchor: "end" });
+});
+
+function setClipStartHere() {
+  const time = currentPlayTime();
+  const length = clipRange.end - clipRange.start;
+  const end = time < clipRange.end - minClipLength() ? clipRange.end : Math.min(totalDuration(), time + length);
+  setClipRange(time, end, { anchor: "start" });
+}
+function setClipEndHere() {
+  const time = currentPlayTime();
+  const length = clipRange.end - clipRange.start;
+  const start = time > clipRange.start + minClipLength() ? clipRange.start : Math.max(0, time - length);
+  setClipRange(start, time, { anchor: "end" });
+}
+document.getElementById("setStartButton").addEventListener("click", setClipStartHere);
+document.getElementById("setEndButton").addEventListener("click", setClipEndHere);
+undoButton.addEventListener("click", undoRange);
+redoButton.addEventListener("click", redoRange);
+
+/* Keyboard shortcuts (editor only): Space, I, O, arrows, Ctrl+Z / Ctrl+Y */
+document.addEventListener("keydown", (event) => {
+  if (!editorView.classList.contains("active")) return;
+  const tag = event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || event.target.isContentEditable) return;
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && (key === "z" || key === "y")) {
+    event.preventDefault();
+    if (key === "y" || event.shiftKey) redoRange(); else undoRange();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (key === " " && tag !== "BUTTON") { event.preventDefault(); togglePlayback(); }
+  else if (key === "i") setClipStartHere();
+  else if (key === "o") setClipEndHere();
+  else if (key === "arrowleft") { event.preventDefault(); seekTo(currentPlayTime() - (event.shiftKey ? 5 : 1)); }
+  else if (key === "arrowright") { event.preventDefault(); seekTo(currentPlayTime() + (event.shiftKey ? 5 : 1)); }
+});
+
+renderRuler();
+renderTimeline();
+updateHistoryButtons();
+
+let importInProgress = false;
+
+function setImportMessage(message) {
+  const box = document.createElement("div");
+  box.className = "empty-state";
+  box.textContent = message;
+  document.getElementById("momentList").replaceChildren(box);
+}
+
+// Download the video behind a saved link, then load it into the editor so it can be clipped.
+async function importLinkSource(projectId) {
+  importInProgress = true;
+  const note = document.getElementById("sourceNote");
+  try {
+    setImportMessage("Downloading the video from your link\u2026 0%");
+    let job = await apiRequest(`/projects/${projectId}/import`, { method: "POST" });
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (job.status !== "complete") {
+      if (job.status === "failed") throw new Error(job.error_message || "The video could not be imported.");
+      if (Date.now() > deadline) throw new Error("The import is taking too long. Please try again shortly.");
+      setImportMessage(`Downloading the video from your link\u2026 ${job.progress}%`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (currentProjectId !== projectId) return; // another project was opened meanwhile
+      job = await apiRequest(`/projects/${projectId}/import`);
+    }
+    if (currentProjectId !== projectId) return;
+    externalPreview.hidden = true;
+    externalPreview.src = "";
+    videoPreview.src = `${API_BASE_URL}/projects/${projectId}/source`; // loadedmetadata sets up the timeline
+    videoPreview.hidden = false;
+    try {
+      const project = await apiRequest(`/projects/${projectId}`);
+      setProjectTitle(project.title);
+    } catch { /* keep the current title */ }
+    setImportMessage("Video imported. Drag the green handles on the timeline to choose your clip, then press Export.");
+    note.textContent = "Video imported. You can now clip and export it.";
+    showToast("Video imported. You can now clip and export it.");
+  } catch (error) {
+    setImportMessage(`Import failed: ${error.message}`);
+    note.textContent = error.message;
+    showToast(error.message);
+  } finally {
+    importInProgress = false;
+  }
+}
 
 async function pollExport(exportId, button) {
   const deadline = Date.now() + 15 * 60 * 1000;
@@ -391,6 +774,10 @@ document.getElementById("exportButton").addEventListener("click", async (event) 
   const button = event.currentTarget;
   if (!currentProjectId) {
     showToast("Open a saved project before exporting.");
+    return;
+  }
+  if (importInProgress) {
+    showToast("The video is still downloading. Please wait until it finishes.");
     return;
   }
   const startSeconds = Number(document.getElementById("clipStartInput").value);

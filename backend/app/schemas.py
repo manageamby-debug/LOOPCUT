@@ -72,6 +72,15 @@ class VideoExportCreate(BaseModel):
         return self
 
 
+class ImportJobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    status: str
+    progress: int
+    error_message: str | None
+
+
 class VideoExportRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

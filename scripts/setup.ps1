@@ -29,7 +29,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     Write-Host 'Created .env from .env.example.'
 }
 
-$missingModules = & $venvPython -c "import importlib.util; names=['fastapi','uvicorn','sqlalchemy','pydantic_settings','multipart']; print(' '.join(name for name in names if importlib.util.find_spec(name) is None))"
+$missingModules = & $venvPython -c "import importlib.util; names=['fastapi','uvicorn','sqlalchemy','pydantic_settings','multipart','celery','yt_dlp']; print(' '.join(name for name in names if importlib.util.find_spec(name) is None))"
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the local Python environment.' }
 if (-not [string]::IsNullOrWhiteSpace(($missingModules -join '').Trim())) {
     Write-Host 'Installing the missing local API packages...'
