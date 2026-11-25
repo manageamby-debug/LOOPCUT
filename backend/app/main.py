@@ -2,8 +2,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.celery_app import render_video_export_task
 from app.db import Base, engine, get_db
 from app.config import settings
 from app.models import Project, VideoExport
+from app.rendering import render_video_export
 from app.schemas import (
     ProjectCreate,
     ProjectRead,
@@ -46,6 +48,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8088", "http://127.0.0.1:8088"],
+    # Allow any localhost port (Live Server, http.server, etc.) during development.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -104,6 +108,7 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 def create_video_export(
     project_id: str,
     payload: VideoExportCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     project = db.get(Project, project_id)
@@ -132,7 +137,11 @@ def create_video_export(
     db.commit()
     db.refresh(export)
     try:
-        render_video_export_task.delay(export.id)
+        if settings.app_env == "local":
+            # No Redis/Celery worker without Docker: render inside the API process.
+            background_tasks.add_task(render_video_export, export.id)
+        else:
+            render_video_export_task.delay(export.id)
     except Exception as exc:
         export.status = "failed"
         export.error_message = "The render queue is unavailable. Start the worker and try again."
@@ -148,7 +157,7 @@ def create_video_export(
     "/api/v1/projects/{project_id}/exports/{export_id}",
     response_model=VideoExportRead,
 )
-def get_video_export(project_id: str, export_id: str, db: Session = Depends(get_db)):
+def get_video_export(project_id: str, export_id: str, request: Request, db: Session = Depends(get_db)):
     export = db.get(VideoExport, export_id)
     if export is None or export.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
@@ -156,12 +165,26 @@ def get_video_export(project_id: str, export_id: str, db: Session = Depends(get_
     if export.status == "complete" and export.render_key:
         try:
             response.download_url = create_video_download_url(export.render_key)
+            if response.download_url.startswith("/"):
+                response.download_url = str(request.base_url).rstrip("/") + response.download_url
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="The rendered video is ready, but its download link could not be created.",
             ) from exc
     return response
+
+
+@app.get("/api/v1/downloads/{render_key:path}", include_in_schema=False)
+def download_local_render(render_key: str):
+    """Serve finished renders from disk (local, Docker-free mode only)."""
+    if settings.app_env != "local":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+    renders_dir = (settings.local_media_dir / "renders").resolve()
+    target = (settings.local_media_dir / render_key).resolve()
+    if renders_dir not in target.parents or not target.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rendered video not found.")
+    return FileResponse(target, media_type="video/mp4", filename="loopcut-clip.mp4")
 
 
 @app.post("/api/v1/projects/{project_id}/upload-url", response_model=UploadUrlRead)

@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
@@ -5,6 +6,8 @@ from pathlib import Path
 from app.db import SessionLocal
 from app.models import Project, VideoExport
 from app.storage import download_video_file, store_rendered_video
+
+logger = logging.getLogger("loopcut.rendering")
 
 
 OUTPUT_SIZES = {
@@ -85,12 +88,20 @@ def render_video_export(export_id: str) -> None:
                 "-nostats",
                 str(output_path),
             ]
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            )
+            stderr_log = work_dir / "ffmpeg-error.log"
+            stderr_handle = stderr_log.open("wb")
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=stderr_handle,
+                    text=True,
+                )
+            except FileNotFoundError as exc:
+                stderr_handle.close()
+                raise RuntimeError(
+                    "FFmpeg is not installed or not on PATH. Install FFmpeg and restart the API."
+                ) from exc
             last_saved_progress = 15
             assert process.stdout is not None
             for line in process.stdout:
@@ -107,8 +118,10 @@ def render_video_export(export_id: str) -> None:
                     last_saved_progress = progress
 
             return_code = process.wait()
+            stderr_handle.close()
             if return_code != 0 or not output_path.exists() or output_path.stat().st_size == 0:
-                raise RuntimeError("FFmpeg could not render this source video.")
+                detail = stderr_log.read_text(errors="ignore").strip()[-300:]
+                raise RuntimeError(f"FFmpeg could not render this source video. {detail}".strip())
 
             export.progress = 92
             db.commit()
@@ -117,11 +130,12 @@ def render_video_export(export_id: str) -> None:
             export.status = "complete"
             export.progress = 100
             db.commit()
-    except Exception:
+    except Exception as exc:
+        logger.exception("Export %s failed", export_id)
         db.rollback()
         export.status = "failed"
         export.progress = 0
-        export.error_message = "Rendering failed. Check the video format and worker logs, then try again."
+        export.error_message = f"Rendering failed: {exc}"[:500]
         db.commit()
     finally:
         db.close()

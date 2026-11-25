@@ -22,14 +22,17 @@ let currentProjectId = null;
 let showingSampleMoments = true;
 let toastTimer;
 
-const API_BASE_URL = "http://localhost:8001/api/v1";
+// Docker page (localhost:8088) talks to the API on 8001; otherwise use the local API on 8000.
+const API_BASE_URL = window.location.port === "8088"
+  ? "http://localhost:8001/api/v1"
+  : "http://127.0.0.1:8000/api/v1";
 
 async function apiRequest(path, options = {}) {
   let response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, options);
   } catch {
-    throw new Error("Loopcut could not reach the API. Make sure Docker is running and open this app at http://localhost:8088.");
+    throw new Error("Loopcut could not reach the API. Start it with .\\scripts\\run-api.ps1 (local) or Docker, then reload this page.");
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {

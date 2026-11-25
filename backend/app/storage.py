@@ -1,6 +1,18 @@
+import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from app.config import settings
+
+
+def _is_local() -> bool:
+    """Docker-free mode: files live on disk instead of S3-compatible storage."""
+    return settings.app_env == "local"
+
+
+def _local_root() -> Path:
+    # Uploaded sources are saved with a key relative to the project root.
+    return settings.local_media_dir.parent.parent
 
 
 def _client(endpoint_url: str):
@@ -57,6 +69,12 @@ def store_video_file(project_id: str, filename: str, content_type: str, fileobj)
 
 
 def download_video_file(object_key: str, destination) -> None:
+    if _is_local():
+        source = _local_root() / object_key
+        if not source.is_file():
+            raise FileNotFoundError(f"Source video not found on disk: {source}")
+        shutil.copyfile(source, destination)
+        return
     _client(settings.s3_internal_endpoint_url).download_file(
         settings.s3_bucket,
         object_key,
@@ -65,6 +83,11 @@ def download_video_file(object_key: str, destination) -> None:
 
 
 def store_rendered_video(object_key: str, source_path) -> None:
+    if _is_local():
+        target = settings.local_media_dir / object_key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, target)
+        return
     _client(settings.s3_internal_endpoint_url).upload_file(
         str(source_path),
         settings.s3_bucket,
@@ -74,6 +97,9 @@ def store_rendered_video(object_key: str, source_path) -> None:
 
 
 def create_video_download_url(object_key: str) -> str:
+    if _is_local():
+        # Served by the API itself (see /api/v1/downloads in main.py).
+        return f"/api/v1/downloads/{object_key}"
     return _client(settings.s3_public_endpoint_url).generate_presigned_url(
         "get_object",
         Params={
